@@ -1,103 +1,146 @@
-const express = require("express");
-const cookieParser = require("cookie-parser");
-const csrf = require("csrf");
-const dotenv = require("dotenv");
-const crypto = require("crypto");
-const bcrypt = require("bcrypt");
-const cors = require("cors");
+const express = require('express');
+const cookieParser = require('cookie-parser');
+const csrf = require('csrf');
+const dotenv = require('dotenv');
+const crypto = require('crypto');
+const cors = require('cors');
+const bcrypt = require('bcryptjs');
 
 dotenv.config();
 
 const port = process.env.PORT || 3000;
-const SECRET_KEY = process.env.SECRET_KEY || "secret";
+const SECRET_KEY = process.env.SECRET_KEY || 'secret';
 
-const users = []; 
+// Almacén en memoria para usuarios y sesiones
+const users = [];
 const sessions = {};
+
+
 const secureCookieOptions = () => ({
-  httpOnly: true,
-  secure: true,
-  sameSite: "strict",
+    httpOnly: true,
+    secure: false, 
+    sameSite: 'strict' 
 });
 
 const app = express();
+
 app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(
-  cors({
-    origin: "http://localhost:3001",
-    credentials: true,
-  })
-);
+// Permite CORS 
+app.use(cors({
+    origin: 'http://localhost:3001',
+    credentials: true
+}));
 
-app.get("/csrf-token", (req, res) => {
-  const csrfToken = new csrf().create(SECRET_KEY);
-  res.json({ csrfToken });
+app.get('/', (req, res) => {
+    res.send('Hello World!');
 });
 
-// Ruta de registro
-app.post("/register", async (req, res) => {
-  const { username, password, csrfToken } = req.body;
-
-  if (!csrf().verify(SECRET_KEY, csrfToken)) {
-    return res.status(403).json({ error: "Invalid CSRF token" });
-  }
-
-  // Validación de usuario
-  if (!usernameRegex.test(username)) {
-    console.log("Nombre de usuario recibido:", username);
-    console.log("Resultado de la validación:", usernameRegex.test(username));
-    return res.status(400).json({ error: "Usuario no válido." });
-}
-
-
-  
-
-  // Validación de contraseña (según imagen proporcionada)
-  const passwordRegex = /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
-  if (!passwordRegex.test(password)) {
-    return res.status(400).json({ error: "Contraseña no cumple los requisitos." });
-  }
-
-  // Normalizar usuario
-  const normalizedUser = username.toLowerCase();
-  
-  // Hashing del usuario y la contraseña
-  const hashedUser = crypto.createHash("sha1").update(normalizedUser).digest("hex");
-  const hashedPassword = await bcrypt.hash(password, 12);
-
-  // Verificar si el usuario ya existe
-  if (users.find((user) => user.username === hashedUser)) {
-    return res.status(400).json({ error: "El usuario ya está registrado." });
-  }
-
-  // Guardar usuario
-  users.push({ username: hashedUser, password: hashedPassword });
-  res.status(201).json({ message: "Cuenta creada correctamente." });
+// Endpoint para obtener un token CSRF válido
+app.get('/csrf-token', (req, res) => {
+    const csrfToken = new csrf().create(SECRET_KEY);
+    res.json({ csrfToken });
 });
 
-// Ruta de login
-app.post("/login", async (req, res) => {
-  const { username, password, csrfToken } = req.body;
+// registro
+app.post('/register', async (req, res) => {
+    const { usuario, password1, password2, csrfToken } = req.body;
 
-  if (!csrf().verify(SECRET_KEY, csrfToken)) {
-    return res.status(403).json({ error: "Invalid CSRF token" });
-  }
-  
-  const normalizedUser = username.toLowerCase();
-  const hashedUser = crypto.createHash("sha1").update(normalizedUser).digest("hex");
+    // Verifica el token CSRF para prevenir ataques cross-site
+    if (!csrf().verify(SECRET_KEY, csrfToken)) {
+        return res.status(403).json({ error: 'Invalid CSRF token' });
+    }
 
-  const user = users.find((user) => user.username === hashedUser);
-  if (!user || !(await bcrypt.compare(password, user.password))) {
-    return res.status(401).json({ error: "Usuario o contraseña incorrectos." });
-  }
+    // Validaciones básicas de campos
+    if (!usuario || !password1 || !password2) {
+        return res.status(400).json({ error: 'Todos los campos son requeridos.' });
+    }
+    if (password1 !== password2) {
+        return res.status(400).json({ error: 'Las contraseñas no coinciden.' });
+    }
 
-  const sessionId = crypto.randomBytes(16).toString("base64url");
-  sessions[sessionId] = { username: hashedUser };
-  res.cookie("sessionId", sessionId, secureCookieOptions());
-  res.status(200).json({ message: "Login successful" });
+    // Validación de nombre de usuario 
+    const regexpUsuario = /^[a-zA-Z][0-9a-zA-Z]{5,49}$/;
+    if (!regexpUsuario.test(usuario)) {
+        return res.status(400).json({ error: 'NOMBRE INVÁLIDO PARA USUARIO' });
+    }
+
+    // Validación de contraseña fuerte
+    function validarPassword(password) {
+        return (
+            password.length >= 10 &&
+            /[A-Z]/.test(password) &&
+            /[a-z]/.test(password) &&
+            /[0-9]/.test(password) &&
+            /[^A-Za-z0-9]/.test(password)
+        );
+    }
+    if (!validarPassword(password1)) {
+        return res.status(400).json({ error: 'CONTRASEÑA INSEGURA' });
+    }
+
+    // Normaliza y hashea el usuario para evitar duplicados 
+    const usuarioNorm = usuario.toLowerCase();
+    const hashUsuario = crypto.createHash('sha1').update(usuarioNorm).digest('hex');
+
+    // Verifica si el usuario ya existe
+    if (users.find(u => u.hashUsuario === hashUsuario)) {
+        return res.status(409).json({ error: 'El usuario ya existe.' });
+    }
+
+    // Hashea la contraseña antes de guardar
+    const hashPassword = await bcrypt.hash(password1, 10); // Salt rounds seguros
+    users.push({ hashUsuario, username: usuarioNorm, password: hashPassword });
+
+    res.status(201).json({ message: 'CUENTA CREADA CORRECTAMENTE' });
 });
 
+// login
+app.post('/login', async (req, res) => {
+    const { username, password, csrfToken } = req.body;
+
+    // Verifica el token CSRF
+    if (!csrf().verify(SECRET_KEY, csrfToken)) {
+        return res.status(403).json({ error: 'Invalid CSRF token' });
+    }
+
+    // Validación de campos
+    if (!username || !password) {
+        return res.status(400).json({ error: 'Usuario y contraseña son requeridos.' });
+    }
+
+    // Normaliza y busca el usuario
+    const usernameNorm = username.toLowerCase();
+    const hashUsuario = crypto.createHash('sha1').update(usernameNorm).digest('hex');
+    const user = users.find(u => u.hashUsuario === hashUsuario);
+    if (!user) {
+        return res.status(401).json({ error: 'Usuario o contraseña incorrectos.' });
+    }
+
+    // Verifica la contraseña hasheada
+    const match = await bcrypt.compare(password, user.password);
+    if (!match) {
+        return res.status(401).json({ error: 'Usuario o contraseña incorrectos.' });
+    }
+
+    // Crea una sesión y la asocia a una cookie segura
+    const sessionId = crypto.randomBytes(16).toString('base64url');
+    sessions[sessionId] = { username: user.username };
+    res.cookie('sessionId', sessionId, secureCookieOptions());
+    res.status(200).json({ message: 'Login succesful' });
+});
+
+// ENDPOINT para obtener el usuario autenticado a partir de la cookie de sesión
+app.get('/me', (req, res) => {
+    const sessionId = req.cookies.sessionId;
+    if (!sessionId || !sessions[sessionId]) {
+        return res.status(401).json({ error: 'No autenticado' });
+    }
+    res.json({ username: sessions[sessionId].username });
+});
+
+// Inicia el servidor 
 app.listen(port, () => {
-  console.log(`Servidor escuchando en http://localhost:${port}`);
+    console.log(`Server listening at http://localhost:${port}`);
 });
