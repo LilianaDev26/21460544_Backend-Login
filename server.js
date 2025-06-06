@@ -15,7 +15,6 @@ const SECRET_KEY = process.env.SECRET_KEY || 'secret';
 const users = [];
 const sessions = {};
 
-
 const secureCookieOptions = () => ({
     httpOnly: true,
     secure: false, 
@@ -43,6 +42,27 @@ app.get('/csrf-token', (req, res) => {
     res.json({ csrfToken });
 });
 
+// Función para validar contraseña
+function validarPassword(password) {
+    return (
+        password.length >= 10 &&
+        /[A-Z]/.test(password) &&
+        /[a-z]/.test(password) &&
+        /[0-9]/.test(password) &&
+        /[^A-Za-z0-9]/.test(password)
+    );
+}
+
+// Función para normalizar el usuario
+function normalizarUsuario(usuario) {
+    return usuario.toLowerCase();
+}
+
+// Función para generar hash del usuario
+function obtenerHashUsuario(usuarioNorm) {
+    return crypto.createHash('sha1').update(usuarioNorm).digest('hex');
+}
+
 // registro
 app.post('/register', async (req, res) => {
     const { usuario, password1, password2, csrfToken } = req.body;
@@ -66,23 +86,14 @@ app.post('/register', async (req, res) => {
         return res.status(400).json({ error: 'NOMBRE INVÁLIDO PARA USUARIO' });
     }
 
-    // Validación de contraseña fuerte
-    function validarPassword(password) {
-        return (
-            password.length >= 10 &&
-            /[A-Z]/.test(password) &&
-            /[a-z]/.test(password) &&
-            /[0-9]/.test(password) &&
-            /[^A-Za-z0-9]/.test(password)
-        );
-    }
+    // Validación de contraseña 
     if (!validarPassword(password1)) {
         return res.status(400).json({ error: 'CONTRASEÑA INSEGURA' });
     }
 
     // Normaliza y hashea el usuario para evitar duplicados 
-    const usuarioNorm = usuario.toLowerCase();
-    const hashUsuario = crypto.createHash('sha1').update(usuarioNorm).digest('hex');
+    const usuarioNorm = normalizarUsuario(usuario);
+    const hashUsuario = obtenerHashUsuario(usuarioNorm);
 
     // Verifica si el usuario ya existe
     if (users.find(u => u.hashUsuario === hashUsuario)) {
@@ -111,8 +122,8 @@ app.post('/login', async (req, res) => {
     }
 
     // Normaliza y busca el usuario
-    const usernameNorm = username.toLowerCase();
-    const hashUsuario = crypto.createHash('sha1').update(usernameNorm).digest('hex');
+    const usernameNorm = normalizarUsuario(username);
+    const hashUsuario = obtenerHashUsuario(usernameNorm);
     const user = users.find(u => u.hashUsuario === hashUsuario);
     if (!user) {
         return res.status(401).json({ error: 'Usuario o contraseña incorrectos.' });
